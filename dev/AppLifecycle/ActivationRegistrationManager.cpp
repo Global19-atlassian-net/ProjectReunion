@@ -64,8 +64,8 @@ namespace winrt::Microsoft::ProjectReunion::implementation
         RegisterForProtocolActivationInternal(scheme, L"", applicationDisplayName, logo);
     }
 
-    void ActivationRegistrationManager::RegisterForToastActivation(hstring const& appUserModelId,
-        hstring const& displayName, hstring const& logo)
+    void ActivationRegistrationManager::RegisterForStartupActivation(hstring const& taskId,
+        bool isEnabled, hstring const& displayName)
     {
         if (displayName.empty())
         {
@@ -77,12 +77,9 @@ namespace winrt::Microsoft::ProjectReunion::implementation
             throw hresult_illegal_method_call();
         }
 
-        RegisterEncodedLaunchSupport(appUserModelId);
+        RegisterEncodedLaunchSupport(taskId);
 
         // TODO: DisplayName
-        // TODO: Logo
-
-        // TODO: EnsureRegister the WNS OOP Server callback here. (calls into main package in some way to get the work done?)
     }
 
     void ActivationRegistrationManager::UnregisterForFileTypeActivation(hstring const& fileType)
@@ -118,12 +115,13 @@ namespace winrt::Microsoft::ProjectReunion::implementation
         UnregisterProgId(progId);
     }
 
-    void ActivationRegistrationManager::UnregisterForToastActivation()
+    void ActivationRegistrationManager::UnregisterForStartupActivation(hstring const& taskId)
     {
         if (HasIdentity())
         {
             throw hresult_illegal_method_call();
         }
+        taskId;
     }
 
     void ActivationRegistrationManager::RegisterForProtocolActivationInternal(hstring const& scheme,

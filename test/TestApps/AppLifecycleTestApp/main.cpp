@@ -79,20 +79,20 @@ int main()
                 SignalPhase(c_testFilePhaseEventName);
                 succeeded = true;
             }
-            else if (argument.compare(L"RegisterToast") == 0)
+            else if (argument.compare(L"RegisterStartup") == 0)
             {
-                ActivationRegistrationManager::RegisterForToastActivation(L"ReunionTest.AppUserModelId", L"TestToast DisplayName", L"");
+                ActivationRegistrationManager::RegisterForStartupActivation(L"taskId", true, L"Startup Activation DisplayName");
 
                 // Signal event that file was registered.
-                SignalPhase(c_testToastPhaseEventName);
+                SignalPhase(c_testStartupPhaseEventName);
                 succeeded = true;
             }
-            else if (argument.compare(L"UnregisterToast") == 0)
+            else if (argument.compare(L"UnregisterStartup") == 0)
             {
-                ActivationRegistrationManager::UnregisterForToastActivation();
+                ActivationRegistrationManager::UnregisterForStartupActivation(L"taskId");
 
                 // Signal event that file was unregistered.
-                SignalPhase(c_testToastPhaseEventName);
+                SignalPhase(c_testStartupPhaseEventName);
                 succeeded = true;
             }
         }
@@ -138,11 +138,15 @@ int main()
         SignalPhase(c_testFilePhaseEventName);
         succeeded = true;
     }
-    else if (kind == ActivationKind::ToastNotification)
+    else if (kind == ActivationKind::StartupTask)
     {
-        // Signal event that toast was activated.
-        SignalPhase(c_testToastPhaseEventName);
-        succeeded = true;
+        auto startupArgs = args.as<IStartupTaskActivatedEventArgs>();
+        if (startupArgs.TaskId() == L"taskId")
+        {
+            // Signal event that toast was activated.
+            SignalPhase(c_testStartupPhaseEventName);
+            succeeded = true;
+        }
     }
 
     if (!succeeded)

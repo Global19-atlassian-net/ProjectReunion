@@ -2,6 +2,8 @@
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 #include "pch.h"
+#include <shlwapi.h>
+
 #include <testdef.h>
 #include "Shared.h"
 
@@ -205,30 +207,90 @@ namespace ProjectReunionCppTest
         //    WaitForEvent(event, m_failed);
         //}
 
-        TEST_METHOD(GetActivatedEventArgsForToast_Win32)
+        std::wstring MultiByteToWideChar(std::string in)
+        {
+            auto len = ::MultiByteToWideChar(CP_ACP, 0, in.c_str(), static_cast<DWORD>(in.size()), nullptr, 0);
+            THROW_LAST_ERROR_IF(len == 0);
+
+            std::vector<wchar_t> out(len);
+            THROW_LAST_ERROR_IF(0 == ::MultiByteToWideChar(CP_ACP, 0, in.c_str(),
+                static_cast<DWORD>(in.size()), out.data(), len));
+            return std::wstring(out.begin(), out.end());
+        }
+
+        std::wstring UrlEscape(std::vector<BYTE> const& data)
+        {
+            std::string escaped;
+            DWORD length = 1;
+
+            HRESULT escapedResult = ::UrlEscapeA(reinterpret_cast<PCSTR>(data.data()), escaped.data(), &length, 0);
+            if (escapedResult == E_POINTER)
+            {
+                escaped.resize(length);
+                escapedResult = ::UrlEscapeA(reinterpret_cast<PCSTR>(data.data()), escaped.data(), &length, 0);
+            }
+            THROW_IF_FAILED(escapedResult);
+            return MultiByteToWideChar(escaped);
+        }
+
+        std::wstring MarshalArguments(Windows::ApplicationModel::Activation::IActivatedEventArgs const& args)
+        {
+            com_ptr<IStream> stream;
+            THROW_IF_FAILED(CreateStreamOnHGlobal(nullptr, TRUE, stream.put()));
+
+            com_ptr<::IUnknown> unk{ args.as<::IUnknown>() };
+            THROW_IF_FAILED(CoMarshalInterface(stream.get(), guid_of<Windows::ApplicationModel::Activation::IActivatedEventArgs>(), unk.get(), MSHCTX_LOCAL, nullptr, MSHLFLAGS_NORMAL));
+
+            const LARGE_INTEGER headOffset{};
+            auto resetStreamOnExit = wil::scope_exit([&stream, &headOffset]
+            {
+                stream->Seek(headOffset, STREAM_SEEK_SET, nullptr);
+                CoReleaseMarshalData(stream.get());
+            });
+
+            THROW_IF_FAILED(stream->Seek(headOffset, STREAM_SEEK_SET, nullptr));
+
+            STATSTG stats{};
+            THROW_IF_FAILED(stream->Stat(&stats, STATFLAG_NONAME));
+
+            std::vector<BYTE> streamData;
+            streamData.resize(static_cast<ULONG>(stats.cbSize.QuadPart) + 1);
+
+            ULONG bytesRead = 0;
+            THROW_IF_FAILED(stream->Read(streamData.data(), static_cast<ULONG>(stats.cbSize.QuadPart), &bytesRead));
+            resetStreamOnExit.release();
+
+            return UrlEscape(streamData);
+        }
+
+        TEST_METHOD(GetActivatedEventArgsForStartup_Win32)
         {
             // Create a named event for communicating with test app.
-            auto event = CreateTestEvent(c_testToastPhaseEventName);
+            auto event = CreateTestEvent(c_testStartupPhaseEventName);
 
             // Launch the test app to register for protocol launches.
-            Execute(L"AppLifecycleTestApp.exe", L"/RegisterToast", g_deploymentDir);
+            Execute(L"AppLifecycleTestApp.exe", L"/RegisterStartup", g_deploymentDir);
 
             // Wait for the register event.
             WaitForEvent(event, m_failed);
 
             // Launch a protocol and wait for the event to fire.
-            //Uri launchUri{ L"ms-launch://PRFeaf8729f68a6633f.Protocol" };
-            Uri launchUri{ L"ms-launch://ReunionTest.AppUserModelId" };
+
+            auto args = winrt::make<TestArgs>(L"foo");
+            auto argsBlob = MarshalArguments(args);
+            std::wstring uri{ L"ms-launch://taskId?MarshaledObject=" };
+            uri += argsBlob;
+            Uri launchUri{ uri };
             auto launchResult = Launcher::LaunchUriAsync(launchUri).get();
             VERIFY_IS_TRUE(launchResult);
 
             // Wait for the protocol activation.
             WaitForEvent(event, m_failed);
 
-            Execute(L"AppLifecycleTestApp.exe", L"/UnregisterToast", g_deploymentDir);
+            Execute(L"AppLifecycleTestApp.exe", L"/UnregisterStartup", g_deploymentDir);
 
             // TODO: Undo this hack once we deserialize args.
-            auto protEvent = CreateTestEvent(c_testProtocolPhaseEventName);
+            auto protEvent = CreateTestEvent(c_testStartupPhaseEventName);
 
             // Wait for the unregister event.
             WaitForEvent(protEvent, m_failed);
