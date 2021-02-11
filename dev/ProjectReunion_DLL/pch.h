@@ -2,6 +2,7 @@
 #include <unknwn.h>
 #include <ShObjIdl_core.h>
 #include <shlguid.h>
+#include <shlwapi.h>
 #include <string>
 #include <string_view>
 #include <thread>

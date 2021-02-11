@@ -278,7 +278,7 @@ namespace ProjectReunionCppTest
 
             auto args = winrt::make<TestArgs>(L"foo");
             auto argsBlob = MarshalArguments(args);
-            std::wstring uri{ L"ms-launch://taskId?MarshaledObject=" };
+            std::wstring uri{ L"ms-launch://taskId?MarshaledArgs=" };
             uri += argsBlob;
             Uri launchUri{ uri };
             auto launchResult = Launcher::LaunchUriAsync(launchUri).get();

@@ -2,7 +2,6 @@
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 #include <pch.h>
-#include <shlwapi.h>
 #include <AppLifecycle.h>
 #include <AppLifecycle.g.cpp>
 
@@ -11,10 +10,15 @@
 #include "FileActivatedEventArgs.h"
 #include "Association.h"
 
+namespace winrt
+{
+    using namespace Windows::Foundation;
+    using namespace Windows::Foundation::Collections;
+    using Windows::ApplicationModel::Activation::IActivatedEventArgs;
+}
+
 namespace winrt::Microsoft::ProjectReunion::implementation
 {
-    using Windows::ApplicationModel::Activation::IActivatedEventArgs;
-
     std::tuple<std::wstring, std::wstring> ParseCommandLine(std::wstring commandLine)
     {
         auto argsStart = commandLine.rfind(L"----");
@@ -45,7 +49,8 @@ namespace winrt::Microsoft::ProjectReunion::implementation
 
     std::string WideCharToMultiByte(std::wstring in)
     {
-        auto len = ::WideCharToMultiByte(CP_ACP, 0, in.c_str(), static_cast<DWORD>(in.size()), nullptr, 0, nullptr, nullptr);
+        auto len = ::WideCharToMultiByte(CP_ACP, 0, in.c_str(), static_cast<DWORD>(in.size()),
+            nullptr, 0, nullptr, nullptr);
         THROW_LAST_ERROR_IF(len == 0);
 
         std::vector<char> out(len);
@@ -61,15 +66,15 @@ namespace winrt::Microsoft::ProjectReunion::implementation
         std::vector<BYTE> unescaped(url.size());
         DWORD length = static_cast<DWORD>(unescaped.size());
 
-        HRESULT unescapedResult = ::UrlUnescapeA(const_cast<PSTR>(data.c_str()),
+        HRESULT unescapeResult = ::UrlUnescapeA(const_cast<PSTR>(data.c_str()),
             reinterpret_cast<PSTR>(unescaped.data()), &length, 0);
-        if (unescapedResult == E_POINTER)
+        if (unescapeResult == E_POINTER)
         {
             unescaped.resize(length);
-            unescapedResult = ::UrlUnescapeA(const_cast<PSTR>(data.c_str()),
+            unescapeResult = ::UrlUnescapeA(const_cast<PSTR>(data.c_str()),
                 reinterpret_cast<PSTR>(unescaped.data()), &length, 0);
         }
-        THROW_IF_FAILED(unescapedResult);
+        THROW_IF_FAILED(unescapeResult);
 
         return unescaped;
     }
@@ -79,18 +84,57 @@ namespace winrt::Microsoft::ProjectReunion::implementation
         com_ptr<::IStream> stream;
         THROW_IF_FAILED(::CreateStreamOnHGlobal(nullptr, TRUE, stream.put()));
 
-        auto decodedStream = UrlUnescape(encodedStream);
-
         ULONG bytesWritten = 0;
-        THROW_IF_FAILED(stream->Write(decodedStream.data(), static_cast<DWORD>(decodedStream.size()), &bytesWritten));
+        auto decodedStream = UrlUnescape(encodedStream);
+        THROW_IF_FAILED(stream->Write(decodedStream.data(), static_cast<DWORD>(decodedStream.size()),
+            &bytesWritten));
 
         const LARGE_INTEGER headOffset{};
         THROW_IF_FAILED(stream->Seek(headOffset, STREAM_SEEK_SET, nullptr));
 
-        com_ptr<IUnknown> unk;
-        THROW_IF_FAILED(::CoUnmarshalInterface(stream.get(), guid_of<IActivatedEventArgs>(), unk.put_void()));
+        com_ptr<::IUnknown> unk;
+        THROW_IF_FAILED(::CoUnmarshalInterface(stream.get(), guid_of<IActivatedEventArgs>(),
+            unk.put_void()));
 
         return unk.try_as<IActivatedEventArgs>();
+    }
+
+    bool IsEncodedLaunch(IProtocolActivatedEventArgs const& args)
+    {
+        return (args.Uri().SchemeName() == L"ms-encodedlaunch");
+    }
+
+    static const struct ExtensionMap
+    {
+        PCWSTR contractId;
+        ActivationKind kind;
+        IActivatedEventArgs (*factory)(IProtocolActivatedEventArgs const& args);
+    } c_extensionMap[] =
+    {
+        { L"Windows.Launch", ActivationKind::Launch, &LaunchActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.File", ActivationKind::File, &FileActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.Protocol", ActivationKind::Protocol, &ProtocolActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.StartupTask", ActivationKind::StartupTask, &LaunchActivatedEventArgs::CreateFromProtocol },
+    };
+
+    IActivatedEventArgs GetEncodedLaunchActivatedEventArgs(IProtocolActivatedEventArgs const& args)
+    {
+        for (auto const& pair : args.Uri().QueryParsed())
+        {
+            if (pair.Name() == L"MarshaledArgs")
+            {
+                // Return the first marshaled args as we only support one.
+                return UnmarshalArgs(pair.Value().c_str());
+            }
+            else if (pair.Name() == L"ContractId")
+            {
+                auto contractId = pair.Value().c_str();
+                // TODO: Construct based on contract type here.
+            }
+        }
+
+        // Let the caller args pass through if nothing was determined here.
+        return args;
     }
 
     IActivatedEventArgs AppLifecycle::GetActivatedEventArgs()
@@ -112,12 +156,16 @@ namespace winrt::Microsoft::ProjectReunion::implementation
                 if (contractId == c_protocolArgumentString)
                 {
                     auto args = make<ProtocolActivatedEventArgs>(contractData);
-                    auto uri = args.as<IProtocolActivatedEventArgs>().Uri();
-                    if (uri.SchemeName() == L"ms-encodedlaunch")
+                    auto protocolArgs = args.as<IProtocolActivatedEventArgs>();
+
+                    // Encoded launch is a protocol launch where the argument data is
+                    // encapsulated in the Uri Query data.  We handle that here and
+                    // try to return the correct IActivatedEventArgs type that is
+                    // encoded in the data rather than the IProtocolActivatedEventArgs
+                    // itself.
+                    if (IsEncodedLaunch(protocolArgs))
                     {
-                        __debugbreak();
-                        std::wstring encodedArgStream = uri.QueryParsed().GetFirstValueByName(L"MarshaledObject").c_str();
-                        return UnmarshalArgs(encodedArgStream);
+                        return GetEncodedLaunchActivatedEventArgs(protocolArgs);
                     }
 
                     return args;
