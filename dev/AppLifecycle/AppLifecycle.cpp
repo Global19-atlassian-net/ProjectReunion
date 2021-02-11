@@ -107,14 +107,13 @@ namespace winrt::Microsoft::ProjectReunion::implementation
     static const struct ExtensionMap
     {
         PCWSTR contractId;
-        ActivationKind kind;
         IActivatedEventArgs (*factory)(IProtocolActivatedEventArgs const& args);
     } c_extensionMap[] =
     {
-        { L"Windows.Launch", ActivationKind::Launch, &LaunchActivatedEventArgs::CreateFromProtocol },
-        { L"Windows.File", ActivationKind::File, &FileActivatedEventArgs::CreateFromProtocol },
-        { L"Windows.Protocol", ActivationKind::Protocol, &ProtocolActivatedEventArgs::CreateFromProtocol },
-        { L"Windows.StartupTask", ActivationKind::StartupTask, &LaunchActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.Launch", &LaunchActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.File", &FileActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.Protocol", &ProtocolActivatedEventArgs::CreateFromProtocol },
+        { L"Windows.StartupTask", &LaunchActivatedEventArgs::CreateFromProtocol },
     };
 
     IActivatedEventArgs GetEncodedLaunchActivatedEventArgs(IProtocolActivatedEventArgs const& args)
@@ -128,8 +127,14 @@ namespace winrt::Microsoft::ProjectReunion::implementation
             }
             else if (pair.Name() == L"ContractId")
             {
-                auto contractId = pair.Value().c_str();
-                // TODO: Construct based on contract type here.
+                for (int index = 0; index < _countof(c_extensionMap); index++)
+                {
+                    auto contractId = pair.Value().c_str();
+                    if (contractId == c_extensionMap[index].contractId)
+                    {
+                        return c_extensionMap[index].factory(args);
+                    }
+                }
             }
         }
 
